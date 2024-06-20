@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Kontaktformular</title>
+    <meta name="description" content="Kontaktformular" />
+  </head>
+  <body>
+    <h1>Kontaktformular</h1>
+    <form method="post" action="/v1/contact-form/submit">
+      <div class="two-horizonal-fields">
+        <div>
+          <label for="first_name">Vorname:</label>
+          <input type="text" id="first_name" name="first_name" required />
+        </div>
+
+        <div>
+          <label for="last_name">Nachname:</label>
+          <input type="text" id="last_name" name="last_name" required />
+        </div>
+      </div>
+      <br />
+
+      <label for="email">E-Mail:</label>
+      <input type="email" id="email" name="email" required /><br /><br />
+
+      <label for="date">Datum:</label>
+      <input type="date" id="date" name="date" required /><br /><br />
+
+      <label for="location">Ort der Veranstaltung:</label>
+      <input type="text" id="location" name="location" required /><br /><br />
+
+      <div class="two-horizonal-fields">
+        <div>
+          <label for="time_start">Uhrzeit von:</label>
+          <input type="time" id="time_start" name="time_start" required />
+        </div>
+        <div>
+          <label for="time_end">Uhrzeit bis:</label>
+          <input type="time" id="time_end" name="time_end" required />
+        </div>
+      </div>
+      <br />
+
+      <label for="type_of_request">Art der Anfrage:</label>
+      <select id="type_of_request" name="type_of_request" required>
+        <option value="">Wähle aus…</option>
+        <option value="Musik / DJ">Musik / DJ</option>
+        <option value="Lasershow">Lasershow</option>
+        <option value="Verleih von Technik">Verleih von Technik</option>
+        <option value="Anderes Anliegen">Anderes Anliegen</option></select
+      ><br /><br />
+
+      <label for="message">Nachricht:</label>
+      <textarea id="message" name="message" rows="10" cols="50" required></textarea><br /><br />
+
+      <input type="submit" value="Submit" />
+    </form>
+  </body>
+</html>
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    background-color: #f2f2f2;
+  }
+
+  h1 {
+    text-align: center;
+    color: #333;
+  }
+
+  form {
+    max-width: 500px;
+    margin: 0 auto;
+    padding: 20px;
+    background-color: #fff;
+    border-radius: 5px;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+  }
+
+  label {
+    display: block;
+    margin-bottom: 10px;
+    color: #555;
+  }
+
+  input[type='text'],
+  input[type='email'],
+  input[type='date'],
+  input[type='time'],
+  select,
+  textarea {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-sizing: border-box;
+    font-size: 14px;
+    margin-bottom: 10px;
+  }
+
+  select {
+    height: 35px;
+  }
+
+  textarea {
+    resize: vertical;
+  }
+
+  input[type='submit'] {
+    background-color: #4caf50;
+    color: white;
+    padding: 10px 20px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 16px;
+  }
+
+  input[type='submit']:hover {
+    background-color: #45a049;
+  }
+
+  .two-horizonal-fields {
+    display: flex;
+    justify-content: space-between;
+    gap: 32px;
+  }
+
+  .two-horizonal-fields div {
+    width: 100%;
+  }
+</style>
+<script>
+  document.querySelector('form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+
+    const formData = new FormData(event.target);
+    const data = Object.fromEntries(formData);
+
+    const response = await fetch('/v1/contact-form/submit', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ ...data, timestamp: new Date().toISOString() })
+    });
+
+    if (response.ok) {
+      alert('Formular wurde erfolgreich abgesendet');
+    } else {
+      alert('Fehler beim Absenden des Formulars');
+    }
+  });
+</script>

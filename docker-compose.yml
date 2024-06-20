@@ -1,0 +1,17 @@
+services:
+  website:
+    build: .
+    container_name: fm-veranstaltungstechnik-backend
+    restart: always
+    env_file: .env
+    ports:
+      - 127.0.0.1:5024:80
+    environment:
+      - TZ=Europe/Berlin
+      - uid=1000
+      - gid=1000
+
+networks:
+  default:
+    external: true
+    name: mfvpn
