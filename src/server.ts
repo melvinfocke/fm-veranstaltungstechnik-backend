@@ -42,7 +42,7 @@ server.post('/v1/contact-form/submit', (req, res) => {
 
   if (!parsedBody.success || !parsedBody.data) return res.status(400).json({ errors: parsedBody.errors });
 
-  const { first_name, last_name, email, date, location, time_start, time_end, type_of_request, message, timestamp } =
+  let { first_name, last_name, email, date, location, time_start, time_end, type_of_request, message, timestamp } =
     parsedBody.data;
 
   const convertedDate = new Date(date).toLocaleDateString('de-DE', {
@@ -50,7 +50,17 @@ server.post('/v1/contact-form/submit', (req, res) => {
     month: '2-digit',
     day: '2-digit'
   });
-  const subject = (spam || !timestamp ? '***SPAM*** ' : '') + `Kontaktanfrage zu ${type_of_request}`;
+
+  let type_of_request_prefix = 'zu';
+  if (type_of_request === 'Lasershow') type_of_request_prefix = 'zu einer';
+  if (type_of_request === 'Verleih von Technik') type_of_request_prefix = 'zum';
+  if (type_of_request === 'Anderes Anliegen') {
+    type_of_request_prefix = 'zu einem';
+    type_of_request = 'anderen Anliegen';
+  }
+
+  const subject =
+    (spam || !timestamp ? '***SPAM*** ' : '') + `Kontaktanfrage ${type_of_request_prefix} ${type_of_request}`;
   const text = `-----\n${location}, ${convertedDate}, ${time_start} bis ${time_end}\n-----\n\n${message}`;
   sendMail(`${first_name} ${last_name}`, email, subject, text);
   res.status(200).json({ message: 'Success' });
