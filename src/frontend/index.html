@@ -25,24 +25,6 @@
       <label for="email">E-Mail:</label>
       <input type="email" id="email" name="email" required /><br /><br />
 
-      <label for="date">Datum:</label>
-      <input type="date" id="date" name="date" required /><br /><br />
-
-      <label for="location">Ort der Veranstaltung:</label>
-      <input type="text" id="location" name="location" required /><br /><br />
-
-      <div class="two-horizonal-fields">
-        <div>
-          <label for="time_start">Uhrzeit von:</label>
-          <input type="time" id="time_start" name="time_start" required />
-        </div>
-        <div>
-          <label for="time_end">Uhrzeit bis:</label>
-          <input type="time" id="time_end" name="time_end" required />
-        </div>
-      </div>
-      <br />
-
       <label for="type_of_request">Art der Anfrage:</label>
       <select id="type_of_request" name="type_of_request" required>
         <option value="">Wähle aus…</option>
@@ -51,6 +33,24 @@
         <option value="Verleih von Technik">Verleih von Technik</option>
         <option value="Anderes Anliegen">Anderes Anliegen</option></select
       ><br /><br />
+
+      <label for="date" class="optional">Datum:</label>
+      <input type="date" id="date" name="date" class="optional" /><br /><br />
+
+      <label for="location" class="optional">Ort der Veranstaltung:</label>
+      <input type="text" id="location" name="location" class="optional" /><br /><br />
+
+      <div class="two-horizonal-fields">
+        <div>
+          <label for="time_start" class="optional">Uhrzeit von:</label>
+          <input type="time" id="time_start" name="time_start" class="optional" />
+        </div>
+        <div>
+          <label for="time_end" class="optional">Uhrzeit bis:</label>
+          <input type="time" id="time_end" name="time_end" class="optional" />
+        </div>
+      </div>
+      <br />
 
       <label for="message">Nachricht:</label>
       <textarea id="message" name="message" rows="10" cols="50" required></textarea><br /><br />
@@ -131,8 +131,31 @@
   .two-horizonal-fields div {
     width: 100%;
   }
+
+  select[name='type_of_request']:has(> option[value='Anderes Anliegen']:checked) ~ .optional,
+  select[name='type_of_request']:has(> option[value='Anderes Anliegen']:checked) ~ div .optional {
+    height: 0;
+    font-size: 0;
+    padding: 0;
+    margin: 0;
+    border: none;
+    opacity: 0;
+    visibility: hidden;
+    display: none;
+  }
 </style>
 <script>
+  const modifyOptionalFields = (isRequired) => {
+    document.querySelectorAll('input.optional').forEach((element) => {
+      element.required = isRequired;
+    });
+  };
+  modifyOptionalFields(true);
+
+  document
+    .querySelector(`select[name='type_of_request']`)
+    .addEventListener('change', (event) => modifyOptionalFields(event.target.value !== 'Anderes Anliegen'));
+
   document.querySelector('form').addEventListener('submit', async (event) => {
     event.preventDefault();
 

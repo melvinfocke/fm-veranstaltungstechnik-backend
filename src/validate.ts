@@ -53,3 +53,21 @@ export const zISODateTime = (fieldName: string) => {
     )
     .trim();
 };
+
+export const zEnum = (fieldName: string, values: string[]) => {
+  return z
+    .string({
+      required_error: `${fieldName} is required`,
+      invalid_type_error: `${fieldName} must be a string`
+    })
+    .refine((value) => values.includes(value), `${fieldName} must be one of: ${values.join(', ')}`);
+};
+
+export const zLiteral = (fieldName: string, value: string) => {
+  return z
+    .string({
+      required_error: `${fieldName} is required`,
+      invalid_type_error: `${fieldName} must be a string`
+    })
+    .refine((v) => v === value, `${fieldName} must be: ${value}`);
+};

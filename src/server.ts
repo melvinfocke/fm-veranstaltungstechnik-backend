@@ -1,7 +1,7 @@
 import express from 'express';
 import { config } from 'dotenv';
 import { z } from 'zod';
-import { zString, zEmail, zDate, zTime, zISODateTime } from './validate';
+import { zString, zEmail, zDate, zTime, zISODateTime, zEnum, zLiteral } from './validate';
 import { send as sendMail } from './mail';
 import { verify as verifySpam } from './spam';
 
@@ -45,23 +45,28 @@ server.post('/v1/contact-form/submit', (req, res) => {
   let { first_name, last_name, email, date, location, time_start, time_end, type_of_request, message, timestamp } =
     parsedBody.data;
 
-  const convertedDate = new Date(date).toLocaleDateString('de-DE', {
+  const convertedDate = new Date(date ?? '').toLocaleDateString('de-DE', {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit'
   });
 
   let type_of_request_prefix = 'zu';
+  let overridden_type_of_request = type_of_request as string;
   if (type_of_request === 'Lasershow') type_of_request_prefix = 'zu einer';
   if (type_of_request === 'Verleih von Technik') type_of_request_prefix = 'zum';
   if (type_of_request === 'Anderes Anliegen') {
     type_of_request_prefix = 'zu einem';
-    type_of_request = 'anderen Anliegen';
+    overridden_type_of_request = 'anderen Anliegen';
   }
 
   const subject =
-    (spam || !timestamp ? '***SPAM*** ' : '') + `Kontaktanfrage ${type_of_request_prefix} ${type_of_request}`;
-  const text = `-----\n${location}, ${convertedDate}, ${time_start} bis ${time_end}\n-----\n\n${message}`;
+    (spam || !timestamp ? '***SPAM*** ' : '') +
+    `Kontaktanfrage ${type_of_request_prefix} ${overridden_type_of_request}`;
+  const text =
+    type_of_request === 'Anderes Anliegen'
+      ? message
+      : `-----\n${location}, ${convertedDate}, ${time_start} bis ${time_end}\n-----\n\n${message}`;
   sendMail(`${first_name} ${last_name}`, email, subject, text);
   res.status(200).json({ message: 'Success' });
 });
@@ -72,20 +77,49 @@ server.listen(PORT, () => {
 
 /* FUNCTIONS */
 const parseBody = (body: any) => {
-  const parsed = z
+  let isOtherRequest = z
     .object({
-      first_name: zString('first_name', 2, 30),
-      last_name: zString('last_name', 2, 30),
-      email: zEmail('email'),
-      date: zDate('date'),
-      location: zString('locaton', 2, 40),
-      time_start: zTime('time_start'),
-      time_end: zTime('time_end'),
-      type_of_request: zString('type_of_request', 2, 40),
-      message: zString('message', 2, 1000),
-      timestamp: zISODateTime('timestamp').optional()
+      type_of_request: z.literal('Anderes Anliegen')
     })
-    .safeParse(body);
+    .safeParse(body).success;
+
+  let parsed = isOtherRequest
+    ? z
+        .object({
+          first_name: zString('first_name', 2, 30),
+          last_name: zString('last_name', 2, 30),
+          email: zEmail('email'),
+          type_of_request: zLiteral('type_of_request', 'Anderes Anliegen'),
+          location: zString('location', 0, 40)
+            .optional()
+            .transform(() => null),
+          date: zString('date', 0, 10)
+            .optional()
+            .transform(() => null),
+          time_start: zString('time_start', 0, 5)
+            .optional()
+            .transform(() => null),
+          time_end: zString('time_end', 0, 5)
+            .optional()
+            .transform(() => null),
+          message: zString('message', 2, 1000),
+          timestamp: zISODateTime('timestamp').optional()
+        })
+        .safeParse(body)
+    : z
+        .object({
+          first_name: zString('first_name', 2, 30),
+          last_name: zString('last_name', 2, 30),
+          email: zEmail('email'),
+          type_of_request: zEnum('type_of_request', ['Musik / DJ', 'Lasershow', 'Verleih von Technik']),
+          location: zString('location', 2, 40),
+          date: zDate('date'),
+          time_start: zTime('time_start'),
+          time_end: zTime('time_end'),
+          message: zString('message', 2, 1000),
+          timestamp: zISODateTime('timestamp').optional()
+        })
+        .safeParse(body);
 
   return {
     success: parsed.success,
