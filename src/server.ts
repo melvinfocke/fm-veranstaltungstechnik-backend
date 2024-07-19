@@ -2,7 +2,7 @@ import express from 'express';
 import { config } from 'dotenv';
 import { z } from 'zod';
 import { zString, zEmail, zDate, zTime, zISODateTime, zEnum, zLiteral } from './validate';
-import { send as sendMail } from './mail';
+import { sendFormSubmission, sendSpamNotification } from './mail';
 import { verify as verifySpam } from './spam';
 
 const server = express();
@@ -15,7 +15,8 @@ export const MAIL_PORT = Number(process.env.MAIL_PORT) ?? 465;
 export const MAIL_SECURE = Boolean(process.env.MAIL_SECURE ?? true);
 export const MAIL_USER = process.env.MAIL_USER ?? '';
 export const MAIL_PASS = process.env.MAIL_PASS ?? '';
-export const MAIL_TO = process.env.MAIL_TO ?? '';
+export const MAIL_TO_FORM_SUBMISSION = process.env.MAIL_TO_FORM_SUBMISSION ?? '';
+export const MAIL_TO_FORM_SPAM = process.env.MAIL_TO_FORM_SPAM ?? '';
 
 /* EXPRESS SETTINGS */
 server.set('trust proxy', true);
@@ -34,9 +35,11 @@ server.get('/dev-frontend', (req, res) => {
 });
 
 server.post('/v1/contact-form/submit', (req, res) => {
-  const { reject, spam, description } = verifySpam(req);
-  console.log(`IP: ${req.ip}, Reject: ${reject}, Spam: ${spam}, Description: ${description}`);
-  if (reject) return res.status(429).json({ errors: [description] });
+  const { reject, rejectMessage, spam, spamReasons } = verifySpam(req);
+  console.log(
+    `IP: ${req.ip}, Reject: ${reject}, RejectMessage: ${rejectMessage}, Spam: ${spam}, SpamReasons: ${spamReasons}`
+  );
+  if (reject) return res.status(429).json({ errors: [rejectMessage] });
 
   const parsedBody = parseBody(req.body);
 
@@ -60,14 +63,51 @@ server.post('/v1/contact-form/submit', (req, res) => {
     overridden_type_of_request = 'anderen Anliegen';
   }
 
-  const subject =
-    (spam || !timestamp ? '***SPAM*** ' : '') +
-    `Kontaktanfrage ${type_of_request_prefix} ${overridden_type_of_request}`;
+  const subject = `${spam ? '***SPAM*** ' : ''}Kontaktanfrage ${type_of_request_prefix} ${overridden_type_of_request}`;
   const text =
     type_of_request === 'Anderes Anliegen'
       ? message
       : `-----\n${location}, ${convertedDate}, ${time_start} bis ${time_end}\n-----\n\n${message}`;
-  sendMail(`${first_name} ${last_name}`, email, subject, text);
+  sendFormSubmission(`${first_name} ${last_name}`, email, subject, text); // Notification about a new contact form submission
+
+  if (spam) {
+    const subject = `Verdächtige Kontaktanfrage ${type_of_request_prefix} ${overridden_type_of_request} erkannt`;
+    const spamReasonsAsString = spamReasons
+      .map(
+        (reason) =>
+          `• ${reason
+            .replace('More than 2 requests within a day', 'Mehr als 2 Anfragen innerhalb eines Tages')
+            .replace('JavaScript is disabled', 'JavaScript ist deaktiviert')}`
+      )
+      .join('\n');
+    const now = new Date().toISOString();
+    const text =
+      `Hallo Admin,\n\n` +
+      `eine neue Kontaktanfrage wurde als Spam erkannt:\n\n` +
+      `--------------------\n` +
+      `Vorname: ${first_name}\n` +
+      `Nachname: ${last_name}\n` +
+      `E-Mail: ${email}\n` +
+      `Art der Anfrage: ${type_of_request}\n` +
+      `Ort: ${location}\n` +
+      `Datum: ${type_of_request === 'Anderes Anliegen' ? 'null' : convertedDate}\n` +
+      `Uhrzeit von: ${time_start}\n` +
+      `Uhrzeit bis: ${time_end}\n` +
+      `Nachricht: ${message}\n` +
+      `--------------------\n` +
+      `IP-Adresse: ipinfo.mfvpn.com/?ip=${req.ip}\n` +
+      `JS Zeitstempel Client: ${timestamp ?? 'null'}\n` +
+      `JS Zeitstempel Server: ${now}\n` +
+      `User-Agent: ${req.get('User-Agent')}\n` +
+      `--------------------\n\n` +
+      `Gründe für die Spam-Einstufung:\n` +
+      `${spamReasonsAsString}\n\n` +
+      `Bitte überprüfe diese Anfrage und ergreife gegebenenfalls notwendige Maßnahmen.\n\n` +
+      `Viele Grüße,\n` +
+      `FM Spam-Filter\n\n` +
+      `(${now.replace('T', ' ').replace(/\.\d{3}Z/, ' UTC')})`;
+    sendSpamNotification(subject, text); // Notification about a potential spam submission
+  }
   res.status(200).json({ message: 'Success' });
 });
 
