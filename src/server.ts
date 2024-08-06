@@ -95,7 +95,7 @@ server.post('/v1/contact-form/submit', (req, res) => {
       `Uhrzeit bis: ${time_end}\n` +
       `Nachricht: ${message}\n` +
       `--------------------\n` +
-      `IP-Adresse: ipinfo.mfvpn.com/?ip=${req.ip}\n` +
+      `IP-Info: https://ipinfo.f3e.network/?ip=${req.ip}\n` +
       `JS Zeitstempel Client: ${timestamp ?? 'null'}\n` +
       `JS Zeitstempel Server: ${now}\n` +
       `User-Agent: ${req.get('User-Agent')}\n` +
@@ -106,7 +106,7 @@ server.post('/v1/contact-form/submit', (req, res) => {
       `Viele Grüße,\n` +
       `FM Spam-Filter\n\n` +
       `(${now.replace('T', ' ').replace(/\.\d{3}Z/, ' UTC')})`;
-    sendSpamNotification(subject, text); // Notification about a potential spam submission
+    sendSpamNotification(subject, text);
   }
   res.status(200).json({ message: 'Success' });
 });
