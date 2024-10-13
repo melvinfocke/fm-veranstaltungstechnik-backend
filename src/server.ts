@@ -34,6 +34,8 @@ server.get('/dev-frontend', (req, res) => {
   res.sendFile('index.html', { root: 'src/frontend' });
 });
 
+server.get('/v1/dev/calender', (req, res) => {});
+
 server.post('/v1/contact-form/submit', (req, res) => {
   const { reject, rejectMessage, spam, spamReasons } = verifySpam(req);
   console.log(
