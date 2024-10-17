@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { zString, zEmail, zDate, zTime, zISODateTime, zEnum, zLiteral } from './validate';
 import { sendFormSubmission, sendSpamNotification } from './mail';
 import { verify as verifySpam } from './spam';
+import { readFile, writeFile } from 'fs/promises';
 
 const server = express();
 
@@ -17,6 +18,7 @@ export const MAIL_USER = process.env.MAIL_USER ?? '';
 export const MAIL_PASS = process.env.MAIL_PASS ?? '';
 export const MAIL_TO_FORM_SUBMISSION = process.env.MAIL_TO_FORM_SUBMISSION ?? '';
 export const MAIL_TO_FORM_SPAM = process.env.MAIL_TO_FORM_SPAM ?? '';
+export const ACTION_URL_PATTERN = process.env.ACTION_URL_PATTERN ?? 'http://127.0.0.1/v1/{OBJECT}/{ID}/{ACTION}';
 
 /* EXPRESS SETTINGS */
 server.set('trust proxy', true);
@@ -36,13 +38,31 @@ server.get('/dev-frontend', (req, res) => {
 
 server.get('/v1/dev/calender', (req, res) => {});
 
-server.post('/v1/contact-form/submit', (req, res) => {
-  const { reject, rejectMessage, spam, spamReasons } = verifySpam(req);
-  console.log(
-    `IP: ${req.ip}, Reject: ${reject}, RejectMessage: ${rejectMessage}, Spam: ${spam}, SpamReasons: ${spamReasons}`
-  );
-  if (reject) return res.status(429).json({ errors: [rejectMessage] });
+server.get('/v1/spam/:id/:action', async (req, res) => {
+  const { id, action } = req.params;
+  const spamRequests = await getHoldSpamRequests();
+  const spamRequest = spamRequests[id];
+  if (!spamRequest) return res.status(404).json({ errors: ['Spam request not found'] });
+  if (action === 'accept') {
+    sendFormSubmission(spamRequest.from, spamRequest.replyTo, spamRequest.subject, spamRequest.text);
+    delete spamRequests[id];
+    await setHoldSpamRequests(spamRequests);
+    res.status(200).json({ message: 'Success' });
+  } else if (action === 'reject') {
+    delete spamRequests[id];
+    await setHoldSpamRequests(spamRequests);
+    res.status(200).json({ message: 'Success' });
+  } else {
+    res.status(400).json({ errors: ['Invalid action'] });
+  }
+});
 
+server.post('/v1/contact-form/submit', async (req, res) => {
+  const { rejectStatus, rejectMessage, spam, spamReasons } = await verifySpam(req);
+  console.log(
+    `IP: ${req.ip}, Reject: ${rejectStatus}, RejectMessage: ${rejectMessage}, Spam: ${spam}, SpamReasons: ${spamReasons}`
+  );
+  if (rejectStatus === 429) return res.status(rejectStatus).json({ errors: [rejectMessage] });
   const parsedBody = parseBody(req.body);
 
   if (!parsedBody.success || !parsedBody.data) return res.status(400).json({ errors: parsedBody.errors });
@@ -70,46 +90,71 @@ server.post('/v1/contact-form/submit', (req, res) => {
     type_of_request === 'Anderes Anliegen'
       ? message
       : `-----\n${location}, ${convertedDate}, ${time_start} bis ${time_end}\n-----\n\n${message}`;
-  sendFormSubmission(`${first_name} ${last_name}`, email, subject, text); // Notification about a new contact form submission
 
-  if (spam) {
-    const subject = `Verdächtige Kontaktanfrage ${type_of_request_prefix} ${overridden_type_of_request} erkannt`;
-    const spamReasonsAsString = spamReasons
-      .map(
-        (reason) =>
-          `• ${reason
-            .replace('More than 2 requests within a day', 'Mehr als 2 Anfragen innerhalb eines Tages')
-            .replace('JavaScript is disabled', 'JavaScript ist deaktiviert')}`
-      )
-      .join('\n');
-    const now = new Date().toISOString();
-    const text =
-      `Hallo Admin,\n\n` +
-      `eine neue Kontaktanfrage wurde als Spam erkannt:\n\n` +
-      `--------------------\n` +
-      `Vorname: ${first_name}\n` +
-      `Nachname: ${last_name}\n` +
-      `E-Mail: ${email}\n` +
-      `Art der Anfrage: ${type_of_request}\n` +
-      `Ort: ${location}\n` +
-      `Datum: ${type_of_request === 'Anderes Anliegen' ? 'null' : convertedDate}\n` +
-      `Uhrzeit von: ${time_start}\n` +
-      `Uhrzeit bis: ${time_end}\n` +
-      `Nachricht: ${message}\n` +
-      `--------------------\n` +
-      `IP-Info: https://ipinfo.f3e.network/?ip=${req.ip}\n` +
-      `JS Zeitstempel Client: ${timestamp ?? 'null'}\n` +
-      `JS Zeitstempel Server: ${now}\n` +
-      `User-Agent: ${req.get('User-Agent')}\n` +
-      `--------------------\n\n` +
-      `Gründe für die Spam-Einstufung:\n` +
-      `${spamReasonsAsString}\n\n` +
-      `Bitte überprüfe diese Anfrage und ergreife gegebenenfalls notwendige Maßnahmen.\n\n` +
-      `Viele Grüße,\n` +
-      `FM Spam-Filter\n\n` +
-      `(${now.replace('T', ' ').replace(/\.\d{3}Z/, ' UTC')})`;
-    sendSpamNotification(subject, text);
+  if (!spam) {
+    sendFormSubmission(`${first_name} ${last_name}`, email, subject, text); // Notification about a new contact form submission
+    res.status(200).json({ message: 'Success' });
+    return;
   }
+  // Store the spam request in a file
+  const spamRequests = await getHoldSpamRequests();
+  const spamRequestId = generateSpamRequestId(spamRequests);
+  spamRequests[spamRequestId] = {
+    from: `${first_name} ${last_name}`,
+    replyTo: email,
+    subject,
+    text
+  };
+  await setHoldSpamRequests(spamRequests);
+
+  const reportSubject = `Verdächtige Kontaktanfrage ${type_of_request_prefix} ${overridden_type_of_request} erkannt`;
+  const spamReasonsAsString = spamReasons
+    .map(
+      (reason) =>
+        `• ${reason
+          .replace('More than 2 requests within a day', 'Mehr als 2 Anfragen innerhalb eines Tages')
+          .replace('JavaScript is disabled', 'JavaScript ist deaktiviert')
+          .replace('Not in European Union', 'Nicht in der Europäischen Union')}`
+    )
+    .join('\n');
+  const actionButtons =
+    `Aktionen:\n` +
+    `**Anfrage weiterleiten**\n` +
+    `  [${ACTION_URL_PATTERN.replace('{ACTION}', 'accept')
+      .replace('{ID}', spamRequestId)
+      .replace('{OBJECT}', 'spam')}]\n` +
+    `**Anfrage verwerfen**\n` +
+    `  [${ACTION_URL_PATTERN.replace('{ACTION}', 'reject')
+      .replace('{ID}', spamRequestId)
+      .replace('{OBJECT}', 'spam')}]\n\n`;
+  const now = new Date().toISOString();
+  const reportText =
+    `Hallo Admin,\n\n` +
+    `eine neue Kontaktanfrage wurde als Spam erkannt:\n\n` +
+    `--------------------\n` +
+    `Vorname: ${first_name}\n` +
+    `Nachname: ${last_name}\n` +
+    `E-Mail: ${email}\n` +
+    `Art der Anfrage: ${type_of_request}\n` +
+    `Ort: ${location}\n` +
+    `Datum: ${type_of_request === 'Anderes Anliegen' ? 'null' : convertedDate}\n` +
+    `Uhrzeit von: ${time_start}\n` +
+    `Uhrzeit bis: ${time_end}\n` +
+    `Nachricht: ${message}\n` +
+    `--------------------\n` +
+    `IP-Info: https://ipinfo.f3e.network/?ip=${req.ip}\n` +
+    `JS Zeitstempel Client: ${timestamp ?? 'null'}\n` +
+    `JS Zeitstempel Server: ${now}\n` +
+    `User-Agent: ${req.get('User-Agent')}\n` +
+    `--------------------\n\n` +
+    `Gründe für die Spam-Einstufung:\n` +
+    `${spamReasonsAsString}\n\n` +
+    `Bitte überprüfe diese Anfrage und ergreife gegebenenfalls notwendige Maßnahmen.\n\n` +
+    actionButtons +
+    `Viele Grüße,\n` +
+    `FM Spam-Filter\n\n` +
+    `(${now.replace('T', ' ').replace(/\.\d{3}Z/, ' UTC')})`;
+  sendSpamNotification(reportSubject, reportText);
   res.status(200).json({ message: 'Success' });
 });
 
@@ -168,4 +213,28 @@ const parseBody = (body: any) => {
     errors: parsed.error?.issues.map((issue) => issue.message),
     data: parsed.data
   };
+};
+
+type SpamRequestFile = {
+  [key: string]: { from: string; replyTo: string; subject: string; text: string };
+};
+
+const getHoldSpamRequests = async () => {
+  try {
+    const data = await readFile('spam-requests.json', 'utf-8');
+    return JSON.parse(data) as SpamRequestFile;
+  } catch (_) {
+    return {};
+  }
+};
+
+const setHoldSpamRequests = async (data: SpamRequestFile) => {
+  await writeFile('spam-requests.json', JSON.stringify(data, null, 2));
+};
+
+const generateSpamRequestId = (data: SpamRequestFile): string => {
+  const CHARS = 'abcdefghkmnopqrstuvwxyz23456789';
+  const id = Array.from({ length: 8 }, () => CHARS[Math.floor(Math.random() * CHARS.length)]).join('');
+  if (data[id]) return generateSpamRequestId(data);
+  return id;
 };

@@ -33,3 +33,4 @@ yarn.lock
 # Miscellaneous
 .DS_Store
 Thumbs.db
+spam-requests.json
