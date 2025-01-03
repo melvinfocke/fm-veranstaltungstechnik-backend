@@ -5,6 +5,9 @@ import { zString, zEmail, zDate, zTime, zISODateTime, zEnum, zLiteral } from './
 import { sendFormSubmission, sendSpamNotification } from './mail';
 import { verify as verifySpam } from './spam';
 import { readFile, writeFile } from 'fs/promises';
+import ical from 'node-ical';
+import { createHash } from 'crypto';
+import cron from 'node-cron';
 
 const server = express();
 
@@ -19,6 +22,11 @@ export const MAIL_PASS = process.env.MAIL_PASS ?? '';
 export const MAIL_TO_FORM_SUBMISSION = process.env.MAIL_TO_FORM_SUBMISSION ?? '';
 export const MAIL_TO_FORM_SPAM = process.env.MAIL_TO_FORM_SPAM ?? '';
 export const ACTION_URL_PATTERN = process.env.ACTION_URL_PATTERN ?? 'http://127.0.0.1/v1/{OBJECT}/{ID}/{ACTION}';
+export const ICAL_URL = (process.env.ICAL_URL ?? '').replace('webcal://', 'https://');
+
+/* GLOBAL VARIABLES */
+let icalHash = '';
+export let blockedDates: Date[] = [];
 
 /* EXPRESS SETTINGS */
 server.set('trust proxy', true);
@@ -36,7 +44,9 @@ server.get('/dev-frontend', (req, res) => {
   res.sendFile('index.html', { root: 'src/frontend' });
 });
 
-server.get('/v1/dev/calender', (req, res) => {});
+server.get('/dev-calendar', async (req, res) => {
+  res.sendFile('index.html', { root: 'src/calendar' });
+});
 
 server.get('/v1/spam/:id/:action', async (req, res) => {
   const { id, action } = req.params;
@@ -57,12 +67,17 @@ server.get('/v1/spam/:id/:action', async (req, res) => {
   }
 });
 
+server.get('/v1/calendar/blocked-dates', async (req, res) => {
+  res.json(blockedDates);
+});
+
 server.post('/v1/contact-form/submit', async (req, res) => {
-  const { rejectStatus, rejectMessage, spam, spamReasons } = await verifySpam(req);
+  const { reject, rejectMessage, spam, spamReasons } = await verifySpam(req);
   console.log(
-    `IP: ${req.ip}, Reject: ${rejectStatus}, RejectMessage: ${rejectMessage}, Spam: ${spam}, SpamReasons: ${spamReasons}`
+    `IP: ${req.ip}, Reject: ${reject}, RejectMessage: ${rejectMessage}, Spam: ${spam}, SpamReasons: ${spamReasons}`
   );
-  if (rejectStatus === 429) return res.status(rejectStatus).json({ errors: [rejectMessage] });
+  if (reject) return res.status(429).json({ errors: [rejectMessage] });
+
   const parsedBody = parseBody(req.body);
 
   if (!parsedBody.success || !parsedBody.data) return res.status(400).json({ errors: parsedBody.errors });
@@ -85,11 +100,15 @@ server.post('/v1/contact-form/submit', async (req, res) => {
     overridden_type_of_request = 'anderen Anliegen';
   }
 
+  let blockedDateHint = spamReasons.includes('Date is already blocked')
+    ? 'Datumskollision - Datum ist bereits geblockt!!!\n'
+    : '';
+
   const subject = `${spam ? '***SPAM*** ' : ''}Kontaktanfrage ${type_of_request_prefix} ${overridden_type_of_request}`;
   const text =
     type_of_request === 'Anderes Anliegen'
       ? message
-      : `-----\n${location}, ${convertedDate}, ${time_start} bis ${time_end}\n-----\n\n${message}`;
+      : `-----\n${location}, ${convertedDate}, ${time_start} bis ${time_end}\n${blockedDateHint}-----\n\n${message}`;
 
   if (!spam) {
     sendFormSubmission(`${first_name} ${last_name}`, email, subject, text); // Notification about a new contact form submission
@@ -114,7 +133,8 @@ server.post('/v1/contact-form/submit', async (req, res) => {
         `• ${reason
           .replace('More than 2 requests within a day', 'Mehr als 2 Anfragen innerhalb eines Tages')
           .replace('JavaScript is disabled', 'JavaScript ist deaktiviert')
-          .replace('Not in European Union', 'Nicht in der Europäischen Union')}`
+          .replace('Not in European Union', 'Nicht in der Europäischen Union')
+          .replace('Date is already blocked', 'Datum ist bereits geblockt')}`
     )
     .join('\n');
   const actionButtons =
@@ -164,6 +184,8 @@ server.listen(PORT, () => {
 
 /* FUNCTIONS */
 const parseBody = (body: any) => {
+  if (body.date) body.date = body.date.split('.').reverse().join('-') ?? body.date;
+
   let isOtherRequest = z
     .object({
       type_of_request: z.literal('Anderes Anliegen')
@@ -238,3 +260,42 @@ const generateSpamRequestId = (data: SpamRequestFile): string => {
   if (data[id]) return generateSpamRequestId(data);
   return id;
 };
+
+const refreshBlockedDates = async () => {
+  let tempBlockedDates: Date[] = [];
+  const data = await ical.async.fromURL(ICAL_URL);
+
+  for (const key in data) {
+    if (data.hasOwnProperty(key)) {
+      const event = data[key] as any;
+
+      if (event.type !== 'VEVENT') continue;
+
+      const start = new Date(event.start);
+      const end = new Date(new Date(event.end).getTime() - 1);
+
+      const DAY_IN_MILLIS = 86_400_000;
+      for (let i = start.getTime() - DAY_IN_MILLIS; i <= end.getTime() + DAY_IN_MILLIS; i += DAY_IN_MILLIS) {
+        const newDate = new Date(i);
+        tempBlockedDates.push(new Date(newDate.getFullYear(), newDate.getMonth(), newDate.getDate()));
+      }
+    }
+  }
+
+  tempBlockedDates.sort((a, b) => a.getTime() - b.getTime());
+  tempBlockedDates = tempBlockedDates.filter((item, pos, arr) => !pos || item.getTime() !== arr[pos - 1].getTime());
+
+  const newIcalHash = createHash('sha256').update(JSON.stringify(tempBlockedDates)).digest('hex');
+  if (newIcalHash === icalHash) return;
+  icalHash = newIcalHash;
+  blockedDates = tempBlockedDates;
+
+  const now = new Date().toISOString().split('.')[0].replace('T', ' ') + ' UTC';
+  console.log(`Blocked dates refreshed (${now})`);
+};
+
+/* CRON JOBS */
+cron.schedule('*/1 * * * *', async () => {
+  await refreshBlockedDates();
+});
+refreshBlockedDates(); // Initial run
