@@ -1,6 +1,6 @@
 {
   "name": "fm-veranstaltungstechnik-backend",
-  "version": "1.3.2",
+  "version": "1.3.3",
   "description": "The backend for the website fm-veranstaltungstechnik.de",
   "main": "server.js",
   "scripts": {
