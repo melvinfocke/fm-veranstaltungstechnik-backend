@@ -162,7 +162,7 @@ server.post('/v1/contact-form/submit', async (req, res) => {
     `Uhrzeit bis: ${time_end}\n` +
     `Nachricht: ${message}\n` +
     `--------------------\n` +
-    `IP-Info: https://ipinfo.f3e.network/?ip=${req.ip}\n` +
+    `IP-Info: https://ipinfo.f3e.de/?ip=${req.ip}\n` +
     `JS Zeitstempel Client: ${timestamp ?? 'null'}\n` +
     `JS Zeitstempel Server: ${now}\n` +
     `User-Agent: ${req.get('User-Agent')}\n` +
